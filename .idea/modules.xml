@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/QueuedThreadPool .iml" filepath="$PROJECT_DIR$/.idea/modules/QueuedThreadPool .iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/QueuedThreadPool_.iml" filepath="$PROJECT_DIR$/.idea/modules/QueuedThreadPool_.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/QueuedThreadPool__main.iml" filepath="$PROJECT_DIR$/.idea/modules/QueuedThreadPool__main.iml" group="QueuedThreadPool_" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/modules/QueuedThreadPool__test.iml" filepath="$PROJECT_DIR$/.idea/modules/QueuedThreadPool__test.iml" group="QueuedThreadPool_" />
+    </modules>
+  </component>
+</project>
