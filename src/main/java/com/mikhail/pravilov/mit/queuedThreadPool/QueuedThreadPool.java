@@ -6,37 +6,22 @@ import java.util.ArrayList;
 import java.util.concurrent.*;
 
 public class QueuedThreadPool {
-    final private ArrayList<QueuedTaskExecutor> threadTasks = new ArrayList<>();
-    final private ArrayList<Thread> threads = new ArrayList<>();
     final private BlockingQueue<FutureTask> tasksToSubmit = new LinkedBlockingQueue<>();
     private Thread executorsDealerThread;
     private boolean isShutdown = false;
-    private int maxQueueSize;
 
     public QueuedThreadPool(int numberOfThreads, int maxQueueSize) {
-        this.maxQueueSize = maxQueueSize;
-        QueuedTaskExecutor queuedTaskExecutor = new QueuedTaskExecutor();
-        for (int i = 0; i < numberOfThreads; i++) {
-            threadTasks.add(queuedTaskExecutor);
-            threads.add(new Thread(queuedTaskExecutor));
-            threads.get(threads.size() - 1).start();
-        }
-        executorsDealerThread = new Thread(new ExecutorsDealer());
+        ExecutorsDealer executorsDealer = new ExecutorsDealer(numberOfThreads, maxQueueSize);
+        executorsDealerThread = new Thread(executorsDealer);
         executorsDealerThread.start();
     }
 
-    public <T> Future<T> submit(@NotNull Callable<T> task) {
+    public <T> Future<T> submit(@NotNull Callable<T> task) throws InterruptedException {
         if (isShutdown) {
             throw new RejectedExecutionException("Finished accepting tasks");
         }
         FutureTask<T> futureTask = new FutureTask<>(task);
-        Runnable putTask = () -> {
-            try {
-                tasksToSubmit.put(futureTask);
-            } catch (InterruptedException ignored) {
-            }
-        };
-        (new Thread(putTask)).start();
+        tasksToSubmit.put(futureTask);
         return futureTask;
     }
 
@@ -46,45 +31,70 @@ public class QueuedThreadPool {
     }
 
     private class ExecutorsDealer implements Runnable {
+        final private ArrayList<QueuedTaskExecutor> executors = new ArrayList<>();
+        final private ArrayList<Thread> executorThreads = new ArrayList<>();
+        private int maxQueueSize;
+
+        ExecutorsDealer(int numberOfThreads, int maxQueueSize) {
+            this.maxQueueSize = maxQueueSize;
+            QueuedTaskExecutor queuedTaskExecutor = new QueuedTaskExecutor();
+            for (int i = 0; i < numberOfThreads; i++) {
+                executors.add(queuedTaskExecutor);
+                executorThreads.add(new Thread(queuedTaskExecutor));
+                executorThreads.get(executorThreads.size() - 1).start();
+            }
+        }
+
         @Override
         public void run() {
             while (!Thread.interrupted()) {
-                QueuedTaskExecutor minLoadedExecutor = getMinLoadedExecutor();
-                if (minLoadedExecutor != null) {
-                    try {
-                        minLoadedExecutor.addTask(tasksToSubmit.take());
-                    } catch (InterruptedException ignored) {
-                    }
-                }
+                submitTaskToExecutor();
             }
-            for (Thread thread : threads) {
-                thread.interrupt();
+            while (!tasksToSubmit.isEmpty()) {
+                submitTaskToExecutor();
             }
-            if (isShutdown) {
-                while (!tasksToSubmit.isEmpty()) {
-                    QueuedTaskExecutor minLoadedExecutor = getMinLoadedExecutor();
-                    if (minLoadedExecutor != null) {
-                        try {
-                            minLoadedExecutor.addTask(tasksToSubmit.take());
-                        } catch (InterruptedException ignored) {
-                        }
-                    }
-                }
+            for (Thread executorThread : executorThreads) {
+                executorThread.interrupt();
             }
         }
-    }
 
-    private QueuedTaskExecutor getMinLoadedExecutor() {
-        QueuedTaskExecutor minLoadedExecutor = null;
-        int minSize = Integer.MAX_VALUE;
-        for (QueuedTaskExecutor task : threadTasks) {
-            int size = task.getQueueSize();
-            if (size < maxQueueSize && size < minSize) {
-                minSize = size;
-                minLoadedExecutor = task;
+        private void submitTaskToExecutor() {
+            QueuedTaskExecutor minLoadedExecutor = getMinLoadedExecutor();
+            if (minLoadedExecutor != null) {
+                FutureTask task = null;
+                boolean setInterrupted = false;
+                try {
+                    task = tasksToSubmit.take();
+                } catch (InterruptedException ignored) {
+                    setInterrupted = true;
+                }
+                while (task != null) {
+                    try {
+                        minLoadedExecutor.tasks.put(task);
+                    } catch (InterruptedException e) {
+                        setInterrupted = true;
+                        continue;
+                    }
+                    task = null;
+                }
+                if (setInterrupted) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
-        return minLoadedExecutor;
+
+        private QueuedTaskExecutor getMinLoadedExecutor() {
+            QueuedTaskExecutor minLoadedExecutor = null;
+            int minSize = Integer.MAX_VALUE;
+            for (QueuedTaskExecutor executor : executors) {
+                int size = executor.tasks.size();
+                if (size < maxQueueSize && size < minSize) {
+                    minSize = size;
+                    minLoadedExecutor = executor;
+                }
+            }
+            return minLoadedExecutor;
+        }
     }
 
     private class QueuedTaskExecutor implements Runnable {
@@ -92,28 +102,22 @@ public class QueuedThreadPool {
 
         @Override
         public void run() {
+            FutureTask task;
             while (!Thread.interrupted()) {
                 try {
-                    tasks.take().run();
+                    task = tasks.take();
+                    task.run();
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            while (!tasks.isEmpty()) {
+                try {
+                    task = tasks.take();
+                    task.run();
                 } catch (InterruptedException ignored) {
                 }
             }
-            if (isShutdown) {
-                while (!tasks.isEmpty()) {
-                    try {
-                        tasks.take().run();
-                    } catch (InterruptedException ignored) {
-                    }
-                }
-            }
-        }
-
-        int getQueueSize() {
-            return tasks.size();
-        }
-
-        void addTask(FutureTask task) throws InterruptedException {
-            tasks.put(task);
         }
     }
 }
